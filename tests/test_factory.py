@@ -22,6 +22,18 @@ class DummyClass:
     def boom(self):
         raise RuntimeError('something wrong.')
 
+    def env(self):
+        import os
+        return os.getenv('CLEANROOM_ENV_VAR')
+
+    def return_type(self):
+        a = {
+                'a': 42,
+                'b': ['nested'],
+        }
+        b = set()
+        return a, b
+
 
 def test_create_proc_and_io_queues():
     proc1, in_queue1, out_queue1 = factory.create_proc_and_io_queues(DummyClass)
@@ -84,3 +96,15 @@ def test_create_instance_error():
 
     with pytest.raises(TypeError):
         proxy.get(42)
+
+
+def test_env(monkeypatch):
+    monkeypatch.setenv('CLEANROOM_ENV_VAR', '42')
+
+    proxy = factory.create_instance(DummyClass)
+    assert proxy.env() == '42'
+
+
+def test_return_type():
+    proxy = factory.create_instance(DummyClass)
+    a, b = proxy.return_type()
