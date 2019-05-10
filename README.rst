@@ -3,6 +3,11 @@ cleanroom
 =========
 
 
+Install::
+
+    pip install cleanroom
+
+
 Create instance in a new process and proxy all operations:
 
 .. code:: python

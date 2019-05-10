@@ -2,6 +2,7 @@ language: python
 python:
 - 3.6
 install:
+- pip install -U pip
 - pip install -U -r requirements_dev.txt --progress-bar off
 - python setup.py develop
 script:
