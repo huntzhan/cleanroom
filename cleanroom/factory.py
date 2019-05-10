@@ -1,6 +1,6 @@
 import sys
 import traceback
-from multiprocessing import Process, Queue
+from multiprocessing import Process, Manager
 
 
 class CleanroomProcess(Process):
@@ -32,40 +32,51 @@ class CleanroomProcess(Process):
                 sys.exit(-1)
 
 
-def create_proc_and_io_queues(instance_cls, *args, **kwargs):
-    in_queue = Queue()
-    out_queue = Queue()
+def create_proc_and_io_queues_and_lock(instance_cls, *args, **kwargs):
+    in_queue = Manager().Queue()
+    out_queue = Manager().Queue()
+    lock = Manager().Lock()  # pylint: disable=no-member
+
     proc = CleanroomProcess(instance_cls, args, kwargs, in_queue, out_queue)
     proc.daemon = True
     proc.start()
-    return proc, in_queue, out_queue
+    return proc, in_queue, out_queue, lock
 
 
-def proxy_call(method_name, proc, in_queue, out_queue, args, kwargs):
-    in_queue.put((method_name, args, kwargs))
-    good, out = out_queue.get()
-    if not good:
-        proc.join()
-        proc.terminate()
-        raise out
-    return out
+class ProxyCall:
+
+    def __init__(self, method_name, in_queue, out_queue, lock):
+        self.method_name = method_name
+        self.in_queue = in_queue
+        self.out_queue = out_queue
+        self.lock = lock
+
+    def __call__(self, *args, **kwargs):
+        with self.lock:
+            self.in_queue.put((self.method_name, args, kwargs))
+            good, out = self.out_queue.get()
+
+        if not good:
+            raise out
+        return out
 
 
 class CleanroomProcessProxy:
 
-    def __init__(self, instance_cls, proc, in_queue, out_queue):
+    def __init__(self, instance_cls, proc, in_queue, out_queue, lock):
         self.instance_cls = instance_cls
         self.proc = proc
         self.in_queue = in_queue
         self.out_queue = out_queue
+        self.lock = lock
 
         self.cached_proxy_call = {}
 
     def __getattribute__(self, method_name):
         instance_cls = object.__getattribute__(self, 'instance_cls')
-        proc = object.__getattribute__(self, 'proc')
         in_queue = object.__getattribute__(self, 'in_queue')
         out_queue = object.__getattribute__(self, 'out_queue')
+        lock = object.__getattribute__(self, 'lock')
 
         if not hasattr(instance_cls, method_name):
             raise NotImplementedError(f'{method_name} is not defined in {instance_cls}')
@@ -74,27 +85,21 @@ class CleanroomProcessProxy:
 
         cached_proxy_call = object.__getattribute__(self, 'cached_proxy_call')
         if method_name not in cached_proxy_call:
-
-            def partial_proxy_call(*args, **kwargs):
-                return proxy_call(
-                        method_name=method_name,
-                        proc=proc,
-                        in_queue=in_queue,
-                        out_queue=out_queue,
-                        args=args,
-                        kwargs=kwargs,
-                )
-
-            cached_proxy_call[method_name] = partial_proxy_call
+            cached_proxy_call[method_name] = ProxyCall(
+                    method_name=method_name,
+                    in_queue=in_queue,
+                    out_queue=out_queue,
+                    lock=lock,
+            )
 
         return cached_proxy_call[method_name]
 
-    def __del__(self):
-        proc = object.__getattribute__(self, 'proc')
-        proc.terminate()
-
 
 def create_instance(instance_cls, *args, **kwargs):
-    proc, in_queue, out_queue = create_proc_and_io_queues(instance_cls, *args, **kwargs)
-    proxy = CleanroomProcessProxy(instance_cls, proc, in_queue, out_queue)
+    proc, in_queue, out_queue, lock = create_proc_and_io_queues_and_lock(
+            instance_cls,
+            *args,
+            **kwargs,
+    )
+    proxy = CleanroomProcessProxy(instance_cls, proc, in_queue, out_queue, lock)
     return proxy

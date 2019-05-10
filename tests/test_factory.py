@@ -1,3 +1,5 @@
+from multiprocessing import Pool
+from concurrent.futures import ThreadPoolExecutor
 import pytest
 from cleanroom import factory
 
@@ -34,10 +36,13 @@ class DummyClass:
         b = set()
         return a, b
 
+    def echo(self, num):
+        return num
 
-def test_create_proc_and_io_queues():
-    proc1, in_queue1, out_queue1 = factory.create_proc_and_io_queues(DummyClass)
-    proc2, in_queue2, out_queue2 = factory.create_proc_and_io_queues(DummyClass)
+
+def test_create_proc_and_io_queues_and_lock():
+    proc1, in_queue1, out_queue1, _ = factory.create_proc_and_io_queues_and_lock(DummyClass)
+    proc2, in_queue2, out_queue2, _ = factory.create_proc_and_io_queues_and_lock(DummyClass)
 
     in_queue1.put(('pid', (), {}))
     in_queue2.put(('pid', (), {}))
@@ -59,8 +64,8 @@ def test_create_proc_and_io_queues():
     proc2.terminate()
 
 
-def test_create_proc_and_io_queues_exception():
-    proc, in_queue, out_queue = factory.create_proc_and_io_queues(DummyClass)
+def test_create_proc_and_io_queues_and_lock_exception():
+    proc, in_queue, out_queue, _ = factory.create_proc_and_io_queues_and_lock(DummyClass)
     in_queue.put(('boom', (), {}))
     good, out = out_queue.get()
     assert not good
@@ -108,3 +113,14 @@ def test_env(monkeypatch):
 def test_return_type():
     proxy = factory.create_instance(DummyClass)
     a, b = proxy.return_type()
+
+
+def test_thread_safe():
+    proxy = factory.create_instance(DummyClass)
+    assert proxy.echo(42) == 42
+
+    num_list = list(range(1000))
+    with Pool(10) as pool:
+        assert list(pool.map(proxy.echo, num_list)) == num_list
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        assert list(pool.map(proxy.echo, num_list)) == num_list
