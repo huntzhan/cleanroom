@@ -3,7 +3,9 @@ cleanroom
 =========
 
 
-Create instance in a new process and proxy all operations::
+Create instance in a new process and proxy all operations:
+
+.. code:: python
 
     import os
     from cleanroom import create_instance
@@ -24,8 +26,8 @@ Create instance in a new process and proxy all operations::
 
     cal = create_instance(Cal, 0)
 
-    print('Cal PID: ', cal.pid())
     print('Parent PID: ', os.getpid())
+    print('Cal PID: ', cal.pid())
 
     print('inc: ', cal.inc())
     print('inc: ', cal.inc())
@@ -33,8 +35,8 @@ Create instance in a new process and proxy all operations::
 
 Output::
 
-    Cal PID:  22272
     Parent PID:  22239
+    Cal PID:  22272
     inc:  1
     inc:  2
 
