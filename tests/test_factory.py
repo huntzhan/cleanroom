@@ -74,7 +74,7 @@ def test_create_proc_channel_exception():
     in_queue.put(('boom', (), {}))
     good, out = out_queue.get()
     assert not good
-    assert isinstance(out, Exception)
+    assert isinstance(out, factory.ExceptionWrapper)
     proc.join()
     assert not proc.is_alive()
 
