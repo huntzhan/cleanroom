@@ -32,42 +32,50 @@ class CleanroomProcess(Process):
                 sys.exit(-1)
 
 
-def create_proc_and_io_queues_and_lock(instance_cls, *args, **kwargs):
-    in_queue = Manager().Queue()
-    out_queue = Manager().Queue()
-    lock = Manager().Lock()  # pylint: disable=no-member
+def create_proc_channel(instance_cls, *args, **kwargs):
+    mgr = Manager()
+    in_queue = mgr.Queue()
+    out_queue = mgr.Queue()
+    state = mgr.Value('b', 1)
+    lock = mgr.Lock()  # pylint: disable=no-member
 
     proc = CleanroomProcess(instance_cls, args, kwargs, in_queue, out_queue)
     proc.daemon = True
     proc.start()
-    return proc, in_queue, out_queue, lock
+    return proc, in_queue, out_queue, state, lock
 
 
 class ProxyCall:
 
-    def __init__(self, method_name, in_queue, out_queue, lock):
+    def __init__(self, method_name, in_queue, out_queue, state, lock):
         self.method_name = method_name
         self.in_queue = in_queue
         self.out_queue = out_queue
+        self.state = state
         self.lock = lock
 
     def __call__(self, *args, **kwargs):
         with self.lock:
+            if self.state.value != 1:
+                raise RuntimeError('The process is not alive!')
+
             self.in_queue.put((self.method_name, args, kwargs))
             good, out = self.out_queue.get()
 
-        if not good:
-            raise out
-        return out
+            if not good:
+                self.state.value = 0
+                raise out
+            return out
 
 
 class CleanroomProcessProxy:
 
-    def __init__(self, instance_cls, proc, in_queue, out_queue, lock):
+    def __init__(self, instance_cls, proc, in_queue, out_queue, state, lock):
         self.instance_cls = instance_cls
         self.proc = proc
         self.in_queue = in_queue
         self.out_queue = out_queue
+        self.state = state
         self.lock = lock
 
         self.cached_proxy_call = {}
@@ -76,6 +84,7 @@ class CleanroomProcessProxy:
         instance_cls = object.__getattribute__(self, 'instance_cls')
         in_queue = object.__getattribute__(self, 'in_queue')
         out_queue = object.__getattribute__(self, 'out_queue')
+        state = object.__getattribute__(self, 'state')
         lock = object.__getattribute__(self, 'lock')
 
         if not hasattr(instance_cls, method_name):
@@ -89,6 +98,7 @@ class CleanroomProcessProxy:
                     method_name=method_name,
                     in_queue=in_queue,
                     out_queue=out_queue,
+                    state=state,
                     lock=lock,
             )
 
@@ -96,10 +106,10 @@ class CleanroomProcessProxy:
 
 
 def create_instance(instance_cls, *args, **kwargs):
-    proc, in_queue, out_queue, lock = create_proc_and_io_queues_and_lock(
+    proc, in_queue, out_queue, state, lock = create_proc_channel(
             instance_cls,
             *args,
             **kwargs,
     )
-    proxy = CleanroomProcessProxy(instance_cls, proc, in_queue, out_queue, lock)
+    proxy = CleanroomProcessProxy(instance_cls, proc, in_queue, out_queue, state, lock)
     return proxy

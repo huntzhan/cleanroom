@@ -39,10 +39,15 @@ class DummyClass:
     def echo(self, num):
         return num
 
+    def echo_boom(self, num):
+        if num > 100:
+            raise ValueError('boom!')
+        return num
 
-def test_create_proc_and_io_queues_and_lock():
-    proc1, in_queue1, out_queue1, _ = factory.create_proc_and_io_queues_and_lock(DummyClass)
-    proc2, in_queue2, out_queue2, _ = factory.create_proc_and_io_queues_and_lock(DummyClass)
+
+def test_create_proc_channel():
+    proc1, in_queue1, out_queue1, _, _ = factory.create_proc_channel(DummyClass)
+    proc2, in_queue2, out_queue2, _, _ = factory.create_proc_channel(DummyClass)
 
     in_queue1.put(('pid', (), {}))
     in_queue2.put(('pid', (), {}))
@@ -64,8 +69,8 @@ def test_create_proc_and_io_queues_and_lock():
     proc2.terminate()
 
 
-def test_create_proc_and_io_queues_and_lock_exception():
-    proc, in_queue, out_queue, _ = factory.create_proc_and_io_queues_and_lock(DummyClass)
+def test_create_proc_channel_exception():
+    proc, in_queue, out_queue, _, _ = factory.create_proc_channel(DummyClass)
     in_queue.put(('boom', (), {}))
     good, out = out_queue.get()
     assert not good
@@ -124,3 +129,13 @@ def test_thread_safe():
         assert list(pool.map(proxy.echo, num_list)) == num_list
     with ThreadPoolExecutor(max_workers=10) as pool:
         assert list(pool.map(proxy.echo, num_list)) == num_list
+
+
+def test_thread_safe_error():
+    proxy = factory.create_instance(DummyClass)
+
+    proxy.echo_boom(0)
+    with pytest.raises(ValueError):
+        proxy.echo_boom(101)
+    with pytest.raises(RuntimeError):
+        proxy.echo_boom(101)
