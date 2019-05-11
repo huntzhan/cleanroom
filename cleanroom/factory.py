@@ -93,24 +93,20 @@ class CleanroomProcessProxy:
 
     def __getattribute__(self, method_name):
         instance_cls = object.__getattribute__(self, 'instance_cls')
-        in_queue = object.__getattribute__(self, 'in_queue')
-        out_queue = object.__getattribute__(self, 'out_queue')
-        state = object.__getattribute__(self, 'state')
-        lock = object.__getattribute__(self, 'lock')
+        cached_proxy_call = object.__getattribute__(self, 'cached_proxy_call')
 
         if not hasattr(instance_cls, method_name):
             raise NotImplementedError(f'{method_name} is not defined in {instance_cls}')
         if not callable(getattr(instance_cls, method_name)):
             raise AttributeError(f'{method_name} is not callable in {instance_cls}')
 
-        cached_proxy_call = object.__getattribute__(self, 'cached_proxy_call')
         if method_name not in cached_proxy_call:
             cached_proxy_call[method_name] = ProxyCall(
                     method_name=method_name,
-                    in_queue=in_queue,
-                    out_queue=out_queue,
-                    state=state,
-                    lock=lock,
+                    in_queue=object.__getattribute__(self, 'in_queue'),
+                    out_queue=object.__getattribute__(self, 'out_queue'),
+                    state=object.__getattribute__(self, 'state'),
+                    lock=object.__getattribute__(self, 'lock'),
             )
 
         return cached_proxy_call[method_name]
