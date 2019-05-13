@@ -28,7 +28,18 @@ class CleanroomProcess(Process):
         self.out_queue = out_queue
 
     def run(self):
-        instance = self.instance_cls(*self.args, **self.kwargs)
+        # Initialization.
+        self.in_queue.get()
+        try:
+            instance = self.instance_cls(*self.args, **self.kwargs)
+            self.out_queue.put((True, None))
+
+        except Exception as exception:  # pylint: disable=broad-except
+            _, _, traceback = sys.exc_info()
+            self.out_queue.put((False, ExceptionWrapper(exception, traceback)))
+            sys.exit(-1)
+
+        # Serving.
         while True:
             method_name, method_args, method_kwargs = self.in_queue.get()
             method = getattr(instance, method_name)
@@ -95,12 +106,12 @@ class CleanroomProcessProxy:
         instance_cls = object.__getattribute__(self, 'instance_cls')
         cached_proxy_call = object.__getattribute__(self, 'cached_proxy_call')
 
-        if not hasattr(instance_cls, method_name):
-            raise NotImplementedError(f'{method_name} is not defined in {instance_cls}')
-        if not callable(getattr(instance_cls, method_name)):
-            raise AttributeError(f'{method_name} is not callable in {instance_cls}')
-
         if method_name not in cached_proxy_call:
+            if not hasattr(instance_cls, method_name):
+                raise NotImplementedError(f'{method_name} is not defined in {instance_cls}')
+            if not callable(getattr(instance_cls, method_name)):
+                raise AttributeError(f'{method_name} is not callable in {instance_cls}')
+
             cached_proxy_call[method_name] = ProxyCall(
                     method_name=method_name,
                     in_queue=object.__getattribute__(self, 'in_queue'),
@@ -122,5 +133,10 @@ def create_instance(instance_cls, *args, **kwargs):
             *args,
             **kwargs,
     )
+    in_queue.put(None)
+    good, out = out_queue.get()
+    if not good:
+        out.raise_again()
+
     proxy = CleanroomProcessProxy(instance_cls, proc, in_queue, out_queue, state, lock)
     return proxy

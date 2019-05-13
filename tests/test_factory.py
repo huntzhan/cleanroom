@@ -45,9 +45,20 @@ class DummyClass:
         return num
 
 
+class DummyClassCorruptedInit:
+
+    def __init__(self):
+        raise ValueError('something wrong.')
+
+
 def test_create_proc_channel():
     proc1, in_queue1, out_queue1, _, _ = factory.create_proc_channel(DummyClass)
+    in_queue1.put(None)
+    assert out_queue1.get()[0]
+
     proc2, in_queue2, out_queue2, _, _ = factory.create_proc_channel(DummyClass)
+    in_queue2.put(None)
+    assert out_queue2.get()[0]
 
     in_queue1.put(('pid', (), {}))
     in_queue2.put(('pid', (), {}))
@@ -71,6 +82,9 @@ def test_create_proc_channel():
 
 def test_create_proc_channel_exception():
     proc, in_queue, out_queue, _, _ = factory.create_proc_channel(DummyClass)
+    in_queue.put(None)
+    assert out_queue.get()[0]
+
     in_queue.put(('boom', (), {}))
     good, out = out_queue.get()
     assert not good
@@ -139,3 +153,8 @@ def test_thread_safe_error():
         proxy.echo_boom(101)
     with pytest.raises(RuntimeError):
         proxy.echo_boom(101)
+
+
+def test_init_error():
+    with pytest.raises(ValueError):
+        factory.create_instance(DummyClassCorruptedInit)
