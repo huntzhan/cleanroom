@@ -1,4 +1,6 @@
 import sys
+import pickle
+import traceback
 from multiprocessing import Process, Manager
 
 import tblib.pickling_support
@@ -7,12 +9,15 @@ tblib.pickling_support.install()
 
 class ExceptionWrapper:
 
-    def __init__(self, exception, traceback):
+    def __init__(self, exception, traceback_obj):
         self.exception = exception
-        self.traceback = traceback
+        self.traceback_obj = traceback_obj
 
     def raise_again(self):
-        raise self.exception.with_traceback(self.traceback)
+        exception = self.exception
+        if self.traceback_obj is not None:
+            exception = self.exception.with_traceback(self.traceback_obj)
+        raise exception
 
 
 class CleanroomProcess(Process):
@@ -21,37 +26,49 @@ class CleanroomProcess(Process):
         super().__init__()
 
         self.instance_cls = instance_cls
+        self.instance = None
         self.args = args
         self.kwargs = kwargs
 
         self.in_queue = in_queue
         self.out_queue = out_queue
 
-    def run(self):
-        # Initialization.
-        self.in_queue.get()
+    def _exception_handler(self, action, in_queue_popped):
         try:
-            instance = self.instance_cls(*self.args, **self.kwargs)
-            self.out_queue.put((True, None))
+            out = action(in_queue_popped)
+            self.out_queue.put((True, out))
 
         except Exception as exception:  # pylint: disable=broad-except
-            _, _, traceback = sys.exc_info()
-            self.out_queue.put((False, ExceptionWrapper(exception, traceback)))
+            _, _, traceback_obj = sys.exc_info()
+            wrapped = ExceptionWrapper(exception, traceback_obj)
+
+            try:
+                pickle.dumps(wrapped)
+            except pickle.PickleError:
+                # Cannot pickle, mock with Built-in excpetion.
+                traceback_lines = ['Traceback (most recent call last):\n']
+                traceback_lines.extend(traceback.format_tb(traceback_obj))
+                text = ''.join(traceback_lines)
+                wrapped = ExceptionWrapper(RuntimeError(text), None)
+
+            self.out_queue.put((False, wrapped))
             sys.exit(-1)
+
+    def _initialize(self, in_queue_popped):  # pylint: disable=unused-argument
+        self.instance = self.instance_cls(*self.args, **self.kwargs)
+
+    def _step(self, in_queue_popped):
+        method_name, method_args, method_kwargs = in_queue_popped
+        method = getattr(self.instance, method_name)
+        return method(*method_args, **method_kwargs)
+
+    def run(self):
+        # Initialization.
+        self._exception_handler(self._initialize, self.in_queue.get())
 
         # Serving.
         while True:
-            method_name, method_args, method_kwargs = self.in_queue.get()
-            method = getattr(instance, method_name)
-
-            try:
-                out = method(*method_args, **method_kwargs)
-                self.out_queue.put((True, out))
-
-            except Exception as exception:  # pylint: disable=broad-except
-                _, _, traceback = sys.exc_info()
-                self.out_queue.put((False, ExceptionWrapper(exception, traceback)))
-                sys.exit(-1)
+            self._exception_handler(self._step, self.in_queue.get())
 
 
 def create_proc_channel(instance_cls, *args, **kwargs):
