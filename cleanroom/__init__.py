@@ -3,6 +3,6 @@
 
 __author__ = """Hunt Zhan"""
 __email__ = 'huntzhan.dev@gmail.com'
-__version__ = '0.2.5'
+__version__ = '0.2.6'
 
 from cleanroom.factory import create_instance
