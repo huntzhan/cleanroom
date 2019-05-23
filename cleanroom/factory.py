@@ -1,6 +1,7 @@
 import sys
 import pickle
 import traceback
+import random
 from multiprocessing import Process, Manager
 
 import tblib.pickling_support
@@ -107,41 +108,58 @@ class ProxyCall:
             return out
 
 
+def _raise_on_invalid_method_name(instance_cls, name):
+    if not hasattr(instance_cls, name):
+        raise NotImplementedError(f'{name} is not defined in {instance_cls}')
+    if not callable(getattr(instance_cls, name)):
+        raise AttributeError(f'{name} is not callable in {instance_cls}')
+
+
+CLEANROOM_PROCESS_PROXY_CRW = {
+        '_crw_instance_cls',
+        '_crw_proc',
+        '_crw_in_queue',
+        '_crw_out_queue',
+        '_crw_state',
+        '_crw_lock',
+        '_crw_cached_proxy_call',
+}
+
+
 class CleanroomProcessProxy:
 
     def __init__(self, instance_cls, proc, in_queue, out_queue, state, lock):
-        self.instance_cls = instance_cls
-        self.proc = proc
-        self.in_queue = in_queue
-        self.out_queue = out_queue
-        self.state = state
-        self.lock = lock
+        for name in CLEANROOM_PROCESS_PROXY_CRW:
+            if hasattr(instance_cls, name):
+                raise AttributeError(f'{instance_cls} contains {name}.')
 
-        self.cached_proxy_call = {}
+        self._crw_instance_cls = instance_cls
+        self._crw_proc = proc
+        self._crw_in_queue = in_queue
+        self._crw_out_queue = out_queue
+        self._crw_state = state
+        self._crw_lock = lock
+        self._crw_cached_proxy_call = {}
 
-    def __getattribute__(self, method_name):
-        instance_cls = object.__getattribute__(self, 'instance_cls')
-        cached_proxy_call = object.__getattribute__(self, 'cached_proxy_call')
+    def __getattribute__(self, name):
+        if name in CLEANROOM_PROCESS_PROXY_CRW:
+            return object.__getattribute__(self, name)
 
-        if method_name not in cached_proxy_call:
-            if not hasattr(instance_cls, method_name):
-                raise NotImplementedError(f'{method_name} is not defined in {instance_cls}')
-            if not callable(getattr(instance_cls, method_name)):
-                raise AttributeError(f'{method_name} is not callable in {instance_cls}')
+        if name not in self._crw_cached_proxy_call:
+            _raise_on_invalid_method_name(self._crw_instance_cls, name)
 
-            cached_proxy_call[method_name] = ProxyCall(
-                    method_name=method_name,
-                    in_queue=object.__getattribute__(self, 'in_queue'),
-                    out_queue=object.__getattribute__(self, 'out_queue'),
-                    state=object.__getattribute__(self, 'state'),
-                    lock=object.__getattribute__(self, 'lock'),
+            self._crw_cached_proxy_call[name] = ProxyCall(
+                    method_name=name,
+                    in_queue=self._crw_in_queue,
+                    out_queue=self._crw_out_queue,
+                    state=self._crw_state,
+                    lock=self._crw_lock,
             )
 
-        return cached_proxy_call[method_name]
+        return self._crw_cached_proxy_call[name]
 
     def __del__(self):
-        proc = object.__getattribute__(self, 'proc')
-        proc.terminate()
+        self._crw_proc.terminate()
 
 
 def create_instance(instance_cls, *args, **kwargs):
@@ -157,3 +175,82 @@ def create_instance(instance_cls, *args, **kwargs):
 
     proxy = CleanroomProcessProxy(instance_cls, proc, in_queue, out_queue, state, lock)
     return proxy
+
+
+class ProxySchedulerCall:
+
+    def __init__(self, scheduler, method_name):
+        self.scheduler = scheduler
+        self.method_name = method_name
+
+    def __call__(self, *args, **kwargs):
+        proxy = self.scheduler._crw_select_instance(*args, **kwargs)
+        return getattr(proxy, self.method_name)(*args, **kwargs)
+
+
+CLEANROOM_PROCESS_PROXY_SCHEDULER_CRW = {
+        '_crw_processes',
+        '_crw_proxies',
+        '_crw_create_instances',
+        '_crw_instance_cls',
+        '_crw_cached_proxy_scheduler_call',
+        '_crw_select_instance',
+}
+
+
+class CleanroomProcessProxyScheduler:
+
+    def __init__(self, processes):
+        self._crw_processes = processes
+        self._crw_proxies = []
+        self._crw_instance_cls = None
+        self._crw_cached_proxy_scheduler_call = {}
+
+    def _crw_create_instances(self, instance_cls, *args, **kwargs):
+        for name in CLEANROOM_PROCESS_PROXY_SCHEDULER_CRW:
+            if hasattr(instance_cls, name):
+                raise AttributeError(f'{instance_cls} contains {name}.')
+
+        self._crw_instance_cls = instance_cls
+        for _ in range(self._crw_processes):
+            self._crw_proxies.append(create_instance(instance_cls, *args, **kwargs))
+
+    def _crw_select_instance(self, *args, **kwargs):
+        raise NotImplementedError()
+
+    def __getattribute__(self, name):
+        if name in CLEANROOM_PROCESS_PROXY_SCHEDULER_CRW:
+            return object.__getattribute__(self, name)
+
+        if name not in self._crw_cached_proxy_scheduler_call:
+            _raise_on_invalid_method_name(self._crw_instance_cls, name)
+
+            self._crw_cached_proxy_scheduler_call[name] = ProxySchedulerCall(
+                    scheduler=self,
+                    method_name=name,
+            )
+
+        return self._crw_cached_proxy_scheduler_call[name]
+
+
+class CleanroomProcessProxyRandomAccessScheduler(CleanroomProcessProxyScheduler):
+
+    def _crw_select_instance(self, *args, **kwargs):
+        return random.choice(self._crw_proxies)
+
+
+_REGISTERED_SCHEDULERS = {
+        'random_access': CleanroomProcessProxyRandomAccessScheduler,
+}
+
+
+def create_scheduler(processes, scheduler_type='random_access'):
+    if scheduler_type not in _REGISTERED_SCHEDULERS:
+        raise ValueError(f'Undefined scheduler type: {scheduler_type}')
+
+    scheduler_cls = _REGISTERED_SCHEDULERS[scheduler_type]
+    return scheduler_cls(processes)
+
+
+def create_instances_under_scheduler(scheduler, instance_cls, *args, **kwargs):
+    scheduler._crw_create_instances(instance_cls, *args, **kwargs)

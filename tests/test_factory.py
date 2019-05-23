@@ -112,14 +112,19 @@ def test_create_instance_error():
     with pytest.raises(NotImplementedError):
         proxy.this_does_not_exists
 
-    with pytest.raises(NotImplementedError):
-        proxy.instance_cls
-
     with pytest.raises(AttributeError):
         proxy.SHOULD_NOT_TOUCH
 
     with pytest.raises(TypeError):
         proxy.get(42)
+
+    class DummyClassMethod:
+
+        def _crw_instance_cls(self):
+            pass
+
+    with pytest.raises(AttributeError):
+        factory.create_instance(DummyClassMethod)
 
 
 def test_env(monkeypatch):
@@ -158,3 +163,10 @@ def test_thread_safe_error():
 def test_init_error():
     with pytest.raises(ValueError):
         factory.create_instance(DummyClassCorruptedInit)
+
+
+def test_random_access_scheduler():
+    scheduler = factory.create_scheduler(5)
+    factory.create_instances_under_scheduler(scheduler, DummyClass)
+    all_pids = set(scheduler.pid() for _ in range(1000))
+    assert len(all_pids) == 5
