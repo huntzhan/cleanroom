@@ -5,4 +5,9 @@ __author__ = """Hunt Zhan"""
 __email__ = 'huntzhan.dev@gmail.com'
 __version__ = '0.2.6'
 
-from cleanroom.factory import create_instance
+from cleanroom.factory import (
+        create_instance,
+        create_scheduler,
+        create_instances_under_scheduler,
+        BatchCall,
+)

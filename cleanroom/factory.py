@@ -2,7 +2,9 @@ import sys
 import pickle
 import traceback
 import random
+import itertools
 from multiprocessing import Process, Manager
+from concurrent.futures import ThreadPoolExecutor
 
 import tblib.pickling_support
 tblib.pickling_support.install()
@@ -110,9 +112,9 @@ class ProxyCall:
 
 def _raise_on_invalid_method_name(instance_cls, name):
     if not hasattr(instance_cls, name):
-        raise NotImplementedError(f'{name} is not defined in {instance_cls}')
+        raise NotImplementedError(f'[name:{name}] is not defined in [cls:{instance_cls}]')
     if not callable(getattr(instance_cls, name)):
-        raise AttributeError(f'{name} is not callable in {instance_cls}')
+        raise AttributeError(f'[name:{name}] is not callable in [cls:{instance_cls}]')
 
 
 CLEANROOM_PROCESS_PROXY_CRW = {
@@ -189,19 +191,23 @@ class ProxySchedulerCall:
 
 
 CLEANROOM_PROCESS_PROXY_SCHEDULER_CRW = {
-        '_crw_processes',
+        '_crw_instances',
+        '_crw_chunksize',
         '_crw_proxies',
         '_crw_create_instances',
         '_crw_instance_cls',
         '_crw_cached_proxy_scheduler_call',
         '_crw_select_instance',
+        'PROXY_SCHEDULER_CALL_CLS',
 }
 
 
 class CleanroomProcessProxyScheduler:
 
-    def __init__(self, processes):
-        self._crw_processes = processes
+    PROXY_SCHEDULER_CALL_CLS = ProxySchedulerCall
+
+    def __init__(self, instances):
+        self._crw_instances = instances
         self._crw_proxies = []
         self._crw_instance_cls = None
         self._crw_cached_proxy_scheduler_call = {}
@@ -212,7 +218,7 @@ class CleanroomProcessProxyScheduler:
                 raise AttributeError(f'{instance_cls} contains {name}.')
 
         self._crw_instance_cls = instance_cls
-        for _ in range(self._crw_processes):
+        for _ in range(self._crw_instances):
             self._crw_proxies.append(create_instance(instance_cls, *args, **kwargs))
 
     def _crw_select_instance(self, *args, **kwargs):
@@ -225,7 +231,7 @@ class CleanroomProcessProxyScheduler:
         if name not in self._crw_cached_proxy_scheduler_call:
             _raise_on_invalid_method_name(self._crw_instance_cls, name)
 
-            self._crw_cached_proxy_scheduler_call[name] = ProxySchedulerCall(
+            self._crw_cached_proxy_scheduler_call[name] = self.PROXY_SCHEDULER_CALL_CLS(
                     scheduler=self,
                     method_name=name,
             )
@@ -239,17 +245,65 @@ class CleanroomProcessProxyRandomAccessScheduler(CleanroomProcessProxyScheduler)
         return random.choice(self._crw_proxies)
 
 
+class BatchCall:
+
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+
+
+class _ZIP_LONGEST_FILL_VALUE:  # pylint: disable=invalid-name
+    pass
+
+
+def _on_batch_call(proxy_call, batch_call):
+    return proxy_call(*batch_call.args, **batch_call.kwargs)
+
+
+class ProxySchedulerBatchCall(ProxySchedulerCall):
+
+    def __call__(self, batch_calls):  # pylint: disable=arguments-differ
+        groups = itertools.zip_longest(
+                *([iter(batch_calls)] * self.scheduler._crw_instances),  # pylint: disable=protected-access
+                fillvalue=_ZIP_LONGEST_FILL_VALUE,
+        )
+        for group in groups:
+            proxy_calls = [
+                    getattr(
+                            self.scheduler._crw_select_instance(  # pylint: disable=protected-access
+                                    *batch_call.args,
+                                    **batch_call.kwargs,
+                            ),
+                            self.method_name,
+                    ) for batch_call in group if batch_call is not _ZIP_LONGEST_FILL_VALUE
+            ]
+            with ThreadPoolExecutor(max_workers=len(proxy_calls)) as pool:
+                yield from pool.map(lambda p: _on_batch_call(*p), zip(proxy_calls, group))
+
+
+class CleanroomProcessProxyBatchScheduler(CleanroomProcessProxyScheduler):  # pylint: disable=abstract-method
+
+    PROXY_SCHEDULER_CALL_CLS = ProxySchedulerBatchCall
+
+
+class CleanroomProcessProxyBatchRandomAccessScheduler(CleanroomProcessProxyBatchScheduler):
+
+    def _crw_select_instance(self, *args, **kwargs):
+        return random.choice(self._crw_proxies)
+
+
 _REGISTERED_SCHEDULERS = {
         'random_access': CleanroomProcessProxyRandomAccessScheduler,
+        'batch_random_access': CleanroomProcessProxyBatchRandomAccessScheduler,
 }
 
 
-def create_scheduler(processes, scheduler_type='random_access'):
+def create_scheduler(instances, scheduler_type='random_access'):
     if scheduler_type not in _REGISTERED_SCHEDULERS:
         raise ValueError(f'Undefined scheduler type: {scheduler_type}')
 
     scheduler_cls = _REGISTERED_SCHEDULERS[scheduler_type]
-    return scheduler_cls(processes)
+    return scheduler_cls(instances)
 
 
 def create_instances_under_scheduler(scheduler, instance_cls, *args, **kwargs):

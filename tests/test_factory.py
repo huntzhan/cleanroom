@@ -17,8 +17,11 @@ class DummyClass:
     def inc(self):
         self.num += 1
 
-    def pid(self):
+    def pid(self, sleep=None):
         import os
+        import time
+        if sleep:
+            time.sleep(sleep)
         return os.getpid()
 
     def boom(self):
@@ -169,4 +172,12 @@ def test_random_access_scheduler():
     scheduler = factory.create_scheduler(5)
     factory.create_instances_under_scheduler(scheduler, DummyClass)
     all_pids = set(scheduler.pid() for _ in range(1000))
+    assert len(all_pids) == 5
+
+
+def test_batch_random_access_scheduler():
+    scheduler = factory.create_scheduler(5, scheduler_type='batch_random_access')
+    factory.create_instances_under_scheduler(scheduler, DummyClass)
+
+    all_pids = set(scheduler.pid([factory.BatchCall()] * 1000))
     assert len(all_pids) == 5
