@@ -184,7 +184,7 @@ class ProxySchedulerCall:
         self.method_name = method_name
 
     def __call__(self, *args, **kwargs):
-        proxy = self.scheduler._crw_select_instance(*args, **kwargs)
+        proxy = self.scheduler._crw_select_instance(*args, **kwargs)  # pylint: disable=protected-access
         return getattr(proxy, self.method_name)(*args, **kwargs)
 
 
@@ -253,4 +253,4 @@ def create_scheduler(processes, scheduler_type='random_access'):
 
 
 def create_instances_under_scheduler(scheduler, instance_cls, *args, **kwargs):
-    scheduler._crw_create_instances(instance_cls, *args, **kwargs)
+    scheduler._crw_create_instances(instance_cls, *args, **kwargs)  # pylint: disable=protected-access
