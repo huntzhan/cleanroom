@@ -3,7 +3,7 @@
 
 __author__ = """Hunt Zhan"""
 __email__ = 'huntzhan.dev@gmail.com'
-__version__ = '0.2.6'
+__version__ = '0.3.0'
 
 from cleanroom.factory import (
         create_instance,
