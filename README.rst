@@ -50,7 +50,7 @@ Output::
     inc:  2
 
 
-Create multiple instances under the `random_access` scheduler.:
+Create multiple instances under the `random_access` scheduler:
 
 .. code:: python
 
@@ -91,6 +91,45 @@ Output::
     Thu May 23 14:01:17 2019 Cal PID: 4395
     Thu May 23 14:01:18 2019 Cal PID: 4397
 
+
+Create multiple instances under the `batch_random_access` scheduler:
+
+.. code:: python
+
+    from cleanroom import BatchCall
+
+    scheduler = create_scheduler(instances=5, scheduler_type='batch_random_access')
+    create_instances_under_scheduler(scheduler, Cal, 0)
+
+    print('Parent PID: ', os.getpid())
+
+    for pid in scheduler.pid(BatchCall(sleep=1) for _ in range(20)):
+        print(time.ctime(), 'Cal PID:', pid)
+
+
+Output::
+
+    Parent PID:  4376
+    Thu May 23 14:04:47 2019 Cal PID: 4429
+    Thu May 23 14:04:47 2019 Cal PID: 4433
+    Thu May 23 14:04:47 2019 Cal PID: 4435
+    Thu May 23 14:04:48 2019 Cal PID: 4433
+    Thu May 23 14:04:48 2019 Cal PID: 4437
+    Thu May 23 14:04:49 2019 Cal PID: 4429
+    Thu May 23 14:04:49 2019 Cal PID: 4433
+    Thu May 23 14:04:49 2019 Cal PID: 4437
+    Thu May 23 14:04:49 2019 Cal PID: 4431
+    Thu May 23 14:04:49 2019 Cal PID: 4435
+    Thu May 23 14:04:50 2019 Cal PID: 4429
+    Thu May 23 14:04:51 2019 Cal PID: 4431
+    Thu May 23 14:04:51 2019 Cal PID: 4435
+    Thu May 23 14:04:51 2019 Cal PID: 4431
+    Thu May 23 14:04:51 2019 Cal PID: 4437
+    Thu May 23 14:04:53 2019 Cal PID: 4429
+    Thu May 23 14:04:53 2019 Cal PID: 4431
+    Thu May 23 14:04:53 2019 Cal PID: 4429
+    Thu May 23 14:04:53 2019 Cal PID: 4437
+    Thu May 23 14:04:53 2019 Cal PID: 4437
 
 
 Credits
