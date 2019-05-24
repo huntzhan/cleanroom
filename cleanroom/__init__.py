@@ -9,5 +9,6 @@ from cleanroom.factory import (
         create_instance,
         create_scheduler,
         create_instances_under_scheduler,
+        get_instances_under_scheduler,
         BatchCall,
 )

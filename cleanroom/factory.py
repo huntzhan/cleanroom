@@ -308,3 +308,7 @@ def create_scheduler(instances, scheduler_type='random_access'):
 
 def create_instances_under_scheduler(scheduler, instance_cls, *args, **kwargs):
     scheduler._crw_create_instances(instance_cls, *args, **kwargs)  # pylint: disable=protected-access
+
+
+def get_instances_under_scheduler(scheduler):
+    return scheduler._crw_proxies  # pylint: disable=protected-access
