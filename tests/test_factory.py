@@ -1,4 +1,5 @@
 from multiprocessing import Pool
+import queue
 from concurrent.futures import ThreadPoolExecutor
 import pytest
 from cleanroom import factory
@@ -8,7 +9,9 @@ class DummyClass:
 
     SHOULD_NOT_TOUCH = 42
 
-    def __init__(self, num=0):
+    def __init__(self, num=0, sleep=0):
+        import time
+        time.sleep(sleep)
         self.num = num
 
     def get(self):
@@ -17,11 +20,10 @@ class DummyClass:
     def inc(self):
         self.num += 1
 
-    def pid(self, sleep=None):
+    def pid(self, sleep=0):
         import os
         import time
-        if sleep:
-            time.sleep(sleep)
+        time.sleep(sleep)
         return os.getpid()
 
     def boom(self):
@@ -113,6 +115,20 @@ def test_create_instance():
 
     proxy3 = factory.create_instance(DummyClass, factory.CleanroomArgs(num=42))
     assert proxy3.get() == 42
+
+
+def test_timeout():
+
+    with pytest.raises(factory.TimeoutException):
+        factory.create_instance(
+                DummyClass,
+                factory.CleanroomArgs(sleep=3),
+                timeout=1,
+        )
+
+    proxy = factory.create_instance(DummyClass, timeout=1)
+    with pytest.raises(factory.TimeoutException):
+        proxy.pid(sleep=3)
 
 
 def test_create_instance_error():

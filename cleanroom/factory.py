@@ -4,6 +4,7 @@ import traceback
 import random
 import itertools
 from multiprocessing import Process, Manager
+import queue
 from concurrent.futures import ThreadPoolExecutor
 
 import tblib.pickling_support
@@ -28,6 +29,10 @@ class ExceptionWrapper:
         if self.traceback_obj is not None:
             exception = self.exception.with_traceback(self.traceback_obj)
         raise exception
+
+
+class TimeoutException(Exception):
+    pass
 
 
 class CleanroomProcess(Process):
@@ -103,10 +108,11 @@ def create_proc_channel(instance_cls, cleanroom_args=None):
 
 class ProxyCall:
 
-    def __init__(self, method_name, in_queue, out_queue, state, lock):
+    def __init__(self, method_name, in_queue, out_queue, timeout, state, lock):
         self.method_name = method_name
         self.in_queue = in_queue
         self.out_queue = out_queue
+        self.timeout = timeout
         self.state = state
         self.lock = lock
 
@@ -116,7 +122,11 @@ class ProxyCall:
                 raise RuntimeError('The process is not alive!')
 
             self.in_queue.put((self.method_name, args, kwargs))
-            good, out = self.out_queue.get()
+            try:
+                good, out = self.out_queue.get(timeout=self.timeout)
+            except queue.Empty:
+                raise TimeoutException(
+                        f'Timeout (timeout={self.timeout}) when calling {self.method_name}.')
 
             if not good:
                 self.state.value = 0
@@ -136,6 +146,7 @@ CLEANROOM_PROCESS_PROXY_CRW = {
         '_crw_proc',
         '_crw_in_queue',
         '_crw_out_queue',
+        '_crw_timeout',
         '_crw_state',
         '_crw_lock',
         '_crw_cached_proxy_call',
@@ -144,7 +155,16 @@ CLEANROOM_PROCESS_PROXY_CRW = {
 
 class CleanroomProcessProxy:
 
-    def __init__(self, instance_cls, proc, in_queue, out_queue, state, lock):
+    def __init__(
+            self,
+            instance_cls,
+            proc,
+            in_queue,
+            out_queue,
+            timeout,
+            state,
+            lock,
+    ):
         for name in CLEANROOM_PROCESS_PROXY_CRW:
             if hasattr(instance_cls, name):
                 raise AttributeError(f'{instance_cls} contains {name}.')
@@ -153,6 +173,7 @@ class CleanroomProcessProxy:
         self._crw_proc = proc
         self._crw_in_queue = in_queue
         self._crw_out_queue = out_queue
+        self._crw_timeout = timeout
         self._crw_state = state
         self._crw_lock = lock
         self._crw_cached_proxy_call = {}
@@ -168,6 +189,7 @@ class CleanroomProcessProxy:
                     method_name=name,
                     in_queue=self._crw_in_queue,
                     out_queue=self._crw_out_queue,
+                    timeout=self._crw_timeout,
                     state=self._crw_state,
                     lock=self._crw_lock,
             )
@@ -178,18 +200,35 @@ class CleanroomProcessProxy:
         self._crw_proc.terminate()
 
 
-def create_instance(instance_cls, cleanroom_args=None):
+def create_instance(
+        instance_cls,
+        cleanroom_args=None,
+        timeout=None,
+):
     proc, in_queue, out_queue, state, lock = create_proc_channel(
             instance_cls,
             cleanroom_args,
     )
+
+    # Initialization.
     in_queue.put(None)
-    good, out = out_queue.get()
+    try:
+        good, out = out_queue.get(timeout=timeout)
+    except queue.Empty:
+        raise TimeoutException(f'Timeout (timeout={timeout}) during initialization.')
+
     if not good:
         out.raise_again()
 
-    proxy = CleanroomProcessProxy(instance_cls, proc, in_queue, out_queue, state, lock)
-    return proxy
+    return CleanroomProcessProxy(
+            instance_cls,
+            proc,
+            in_queue,
+            out_queue,
+            timeout,
+            state,
+            lock,
+    )
 
 
 class ProxySchedulerCall:
@@ -225,14 +264,19 @@ class CleanroomProcessProxyScheduler:
         self._crw_instance_cls = None
         self._crw_cached_proxy_scheduler_call = {}
 
-    def _crw_create_instances(self, instance_cls, cleanroom_args=None):
+    def _crw_create_instances(
+            self,
+            instance_cls,
+            cleanroom_args=None,
+            timeout=None,
+    ):
         for name in CLEANROOM_PROCESS_PROXY_SCHEDULER_CRW:
             if hasattr(instance_cls, name):
                 raise AttributeError(f'{instance_cls} contains {name}.')
 
         self._crw_instance_cls = instance_cls
         for _ in range(self._crw_instances):
-            self._crw_proxies.append(create_instance(instance_cls, cleanroom_args))
+            self._crw_proxies.append(create_instance(instance_cls, cleanroom_args, timeout))
 
     def _crw_select_instance(self, *args, **kwargs):
         raise NotImplementedError()
@@ -312,8 +356,17 @@ def create_scheduler(instances, scheduler_type='random_access'):
     return scheduler_cls(instances)
 
 
-def create_instances_under_scheduler(scheduler, instance_cls, cleanroom_args=None):
-    scheduler._crw_create_instances(instance_cls, cleanroom_args)  # pylint: disable=protected-access
+def create_instances_under_scheduler(
+        scheduler,
+        instance_cls,
+        cleanroom_args=None,
+        timeout=None,
+):
+    scheduler._crw_create_instances(  # pylint: disable=protected-access
+            instance_cls,
+            cleanroom_args,
+            timeout,
+    )
 
 
 def get_instances_under_scheduler(scheduler):
