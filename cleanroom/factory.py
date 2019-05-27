@@ -150,10 +150,17 @@ CLEANROOM_PROCESS_PROXY_CRW = {
         '_crw_state',
         '_crw_lock',
         '_crw_cached_proxy_call',
+        '_crw_check_instance_cls_methods',
 }
 
 
 class CleanroomProcessProxy:
+
+    @staticmethod
+    def _crw_check_instance_cls_methods(instance_cls):
+        for name in CLEANROOM_PROCESS_PROXY_CRW:
+            if hasattr(instance_cls, name):
+                raise AttributeError(f'{instance_cls} contains {name}.')
 
     def __init__(
             self,
@@ -165,10 +172,6 @@ class CleanroomProcessProxy:
             state,
             lock,
     ):
-        for name in CLEANROOM_PROCESS_PROXY_CRW:
-            if hasattr(instance_cls, name):
-                raise AttributeError(f'{instance_cls} contains {name}.')
-
         self._crw_instance_cls = instance_cls
         self._crw_proc = proc
         self._crw_in_queue = in_queue
@@ -205,6 +208,8 @@ def create_instance(
         cleanroom_args=None,
         timeout=None,
 ):
+    CleanroomProcessProxy._crw_check_instance_cls_methods(instance_cls)
+
     proc, in_queue, out_queue, state, lock = create_proc_channel(
             instance_cls,
             cleanroom_args,
