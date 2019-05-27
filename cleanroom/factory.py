@@ -5,6 +5,7 @@ import random
 import itertools
 from multiprocessing import Process, Manager
 import queue
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import tblib.pickling_support
@@ -83,7 +84,11 @@ class CleanroomProcess(Process):
 
         # Serving.
         while True:
-            self._exception_handler(self._step, self.in_queue.get())
+            try:
+                obj = self.in_queue.get()
+            except EOFError:
+                break
+            self._exception_handler(self._step, obj)
 
 
 def create_proc_channel(instance_cls, cleanroom_args=None):
@@ -103,6 +108,8 @@ def create_proc_channel(instance_cls, cleanroom_args=None):
     proc = CleanroomProcess(instance_cls, args, kwargs, in_queue, out_queue)
     proc.daemon = True
     proc.start()
+    while not proc.is_alive():
+        time.sleep(0.01)
     return proc, in_queue, out_queue, state, lock
 
 
@@ -199,16 +206,13 @@ class CleanroomProcessProxy:
 
         return self._crw_cached_proxy_call[name]
 
-    def __del__(self):
-        self._crw_proc.terminate()
-
 
 def create_instance(
         instance_cls,
         cleanroom_args=None,
         timeout=None,
 ):
-    CleanroomProcessProxy._crw_check_instance_cls_methods(instance_cls)
+    CleanroomProcessProxy._crw_check_instance_cls_methods(instance_cls)  # pylint: disable=protected-access
 
     proc, in_queue, out_queue, state, lock = create_proc_channel(
             instance_cls,
