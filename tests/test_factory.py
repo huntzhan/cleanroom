@@ -8,8 +8,8 @@ class DummyClass:
 
     SHOULD_NOT_TOUCH = 42
 
-    def __init__(self):
-        self.num = 0
+    def __init__(self, num=0):
+        self.num = num
 
     def get(self):
         return self.num
@@ -108,6 +108,12 @@ def test_create_instance():
     with pytest.raises(RuntimeError):
         proxy1.boom()
 
+    proxy3 = factory.create_instance(DummyClass, factory.CleanroomArgs(42))
+    assert proxy3.get() == 42
+
+    proxy3 = factory.create_instance(DummyClass, factory.CleanroomArgs(num=42))
+    assert proxy3.get() == 42
+
 
 def test_create_instance_error():
     proxy = factory.create_instance(DummyClass)
@@ -179,5 +185,5 @@ def test_batch_random_access_scheduler():
     scheduler = factory.create_scheduler(5, scheduler_type='batch_random_access')
     factory.create_instances_under_scheduler(scheduler, DummyClass)
 
-    all_pids = set(scheduler.pid([factory.BatchCall()] * 1000))
+    all_pids = set(scheduler.pid([factory.CleanroomArgs()] * 1000))
     assert len(all_pids) == 5

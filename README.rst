@@ -14,7 +14,7 @@ Create instance in a new process and proxy all operations:
 
     import os
     import time
-    from cleanroom import create_instance
+    from cleanroom import create_instance, CleanroomArgs
 
 
     class Cal:
@@ -33,7 +33,7 @@ Create instance in a new process and proxy all operations:
             return os.getpid()
 
 
-    cal = create_instance(Cal, 0)
+    cal = create_instance(Cal, CleanroomArgs(0))
 
     print('Parent PID: ', os.getpid())
     print('Cal PID: ', cal.pid())
@@ -58,7 +58,7 @@ Create multiple instances under the `random_access` scheduler:
 
 
     scheduler = create_scheduler(instances=5, scheduler_type='random_access')
-    create_instances_under_scheduler(scheduler, Cal, 0)
+    create_instances_under_scheduler(scheduler, Cal, CleanroomArgs(0))
 
     print('Parent PID: ', os.getpid())
 
@@ -96,14 +96,12 @@ Create multiple instances under the `batch_random_access` scheduler:
 
 .. code:: python
 
-    from cleanroom import BatchCall
-
     scheduler = create_scheduler(instances=5, scheduler_type='batch_random_access')
-    create_instances_under_scheduler(scheduler, Cal, 0)
+    create_instances_under_scheduler(scheduler, Cal, CleanroomArgs(0))
 
     print('Parent PID: ', os.getpid())
 
-    for pid in scheduler.pid(BatchCall(sleep=1) for _ in range(20)):
+    for pid in scheduler.pid(CleanroomArgs(sleep=1) for _ in range(20)):
         print(time.ctime(), 'Cal PID:', pid)
 
 

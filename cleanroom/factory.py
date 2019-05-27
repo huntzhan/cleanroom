@@ -10,6 +10,13 @@ import tblib.pickling_support
 tblib.pickling_support.install()
 
 
+class CleanroomArgs:
+
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+
+
 class ExceptionWrapper:
 
     def __init__(self, exception, traceback_obj):
@@ -74,12 +81,19 @@ class CleanroomProcess(Process):
             self._exception_handler(self._step, self.in_queue.get())
 
 
-def create_proc_channel(instance_cls, *args, **kwargs):
+def create_proc_channel(instance_cls, cleanroom_args=None):
     mgr = Manager()
     in_queue = mgr.Queue(maxsize=1)
     out_queue = mgr.Queue(maxsize=1)
     state = mgr.Value('b', 1)
     lock = mgr.Lock()  # pylint: disable=no-member
+
+    if cleanroom_args is None:
+        args = ()
+        kwargs = {}
+    else:
+        args = cleanroom_args.args
+        kwargs = cleanroom_args.kwargs
 
     proc = CleanroomProcess(instance_cls, args, kwargs, in_queue, out_queue)
     proc.daemon = True
@@ -164,11 +178,10 @@ class CleanroomProcessProxy:
         self._crw_proc.terminate()
 
 
-def create_instance(instance_cls, *args, **kwargs):
+def create_instance(instance_cls, cleanroom_args=None):
     proc, in_queue, out_queue, state, lock = create_proc_channel(
             instance_cls,
-            *args,
-            **kwargs,
+            cleanroom_args,
     )
     in_queue.put(None)
     good, out = out_queue.get()
@@ -212,14 +225,14 @@ class CleanroomProcessProxyScheduler:
         self._crw_instance_cls = None
         self._crw_cached_proxy_scheduler_call = {}
 
-    def _crw_create_instances(self, instance_cls, *args, **kwargs):
+    def _crw_create_instances(self, instance_cls, cleanroom_args=None):
         for name in CLEANROOM_PROCESS_PROXY_SCHEDULER_CRW:
             if hasattr(instance_cls, name):
                 raise AttributeError(f'{instance_cls} contains {name}.')
 
         self._crw_instance_cls = instance_cls
         for _ in range(self._crw_instances):
-            self._crw_proxies.append(create_instance(instance_cls, *args, **kwargs))
+            self._crw_proxies.append(create_instance(instance_cls, cleanroom_args))
 
     def _crw_select_instance(self, *args, **kwargs):
         raise NotImplementedError()
@@ -243,13 +256,6 @@ class CleanroomProcessProxyRandomAccessScheduler(CleanroomProcessProxyScheduler)
 
     def _crw_select_instance(self, *args, **kwargs):
         return random.choice(self._crw_proxies)
-
-
-class BatchCall:
-
-    def __init__(self, *args, **kwargs):
-        self.args = args
-        self.kwargs = kwargs
 
 
 class _ZIP_LONGEST_FILL_VALUE:  # pylint: disable=invalid-name
@@ -306,8 +312,8 @@ def create_scheduler(instances, scheduler_type='random_access'):
     return scheduler_cls(instances)
 
 
-def create_instances_under_scheduler(scheduler, instance_cls, *args, **kwargs):
-    scheduler._crw_create_instances(instance_cls, *args, **kwargs)  # pylint: disable=protected-access
+def create_instances_under_scheduler(scheduler, instance_cls, cleanroom_args=None):
+    scheduler._crw_create_instances(instance_cls, cleanroom_args)  # pylint: disable=protected-access
 
 
 def get_instances_under_scheduler(scheduler):
