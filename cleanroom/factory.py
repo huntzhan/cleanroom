@@ -76,8 +76,8 @@ class CleanroomProcess(Process):
 
 def create_proc_channel(instance_cls, *args, **kwargs):
     mgr = Manager()
-    in_queue = mgr.Queue()
-    out_queue = mgr.Queue()
+    in_queue = mgr.Queue(maxsize=1)
+    out_queue = mgr.Queue(maxsize=1)
     state = mgr.Value('b', 1)
     lock = mgr.Lock()  # pylint: disable=no-member
 
