@@ -1,3 +1,5 @@
+import os
+import gc
 from multiprocessing import Pool
 import queue
 from concurrent.futures import ThreadPoolExecutor
@@ -54,6 +56,15 @@ class DummyClassCorruptedInit:
 
     def __init__(self):
         raise ValueError('something wrong.')
+
+
+def check_pid(pid):
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    else:
+        return True
 
 
 def test_create_proc_channel():
@@ -115,6 +126,14 @@ def test_create_instance():
 
     proxy3 = factory.create_instance(DummyClass, factory.CleanroomArgs(num=42))
     assert proxy3.get() == 42
+
+
+def test_gc():
+    proxy = factory.create_instance(DummyClass)
+    pid = proxy.pid()
+    del proxy
+    gc.collect()
+    assert not check_pid(pid)
 
 
 def test_timeout():

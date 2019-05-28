@@ -206,6 +206,21 @@ class CleanroomProcessProxy:
 
         return self._crw_cached_proxy_call[name]
 
+    def __del__(self):
+        # Remove process in GC.
+        self._crw_proc.terminate()
+
+        # Default timeout: 30s.
+        timeout = self._crw_timeout or 30
+        gap = 0.1
+        acc = 0
+        while acc < timeout and self._crw_proc.is_alive():
+            time.sleep(gap)
+            acc += gap
+        if acc >= timeout:
+            # Kill.
+            self._crw_proc.kill()
+
 
 def create_instance(
         instance_cls,
