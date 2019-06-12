@@ -1,4 +1,6 @@
 import sys
+import os
+import logging
 import pickle
 import traceback
 import random
@@ -10,6 +12,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import tblib.pickling_support
 tblib.pickling_support.install()
+
+logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
 
 class CleanroomArgs:
@@ -90,6 +94,9 @@ class CleanroomProcess(Process):
                 break
             self._exception_handler(self._step, obj)
 
+    def __repr__(self):
+        return f'<PID={self.pid}, {super().__repr__()}>'
+
 
 def create_proc_channel(instance_cls, cleanroom_args=None):
     mgr = Manager()
@@ -108,8 +115,13 @@ def create_proc_channel(instance_cls, cleanroom_args=None):
     proc = CleanroomProcess(instance_cls, args, kwargs, in_queue, out_queue)
     proc.daemon = True
     proc.start()
+    logger.debug('create_proc_channel: proc=%s started.', proc)
+
     while not proc.is_alive():
+        logger.debug('create_proc_channel: proc=%s not alive, waiting...', proc)
         time.sleep(0.01)
+
+    logger.debug('create_proc_channel: proc=%s is alive.', proc)
     return proc, in_queue, out_queue, state, lock
 
 
@@ -208,18 +220,26 @@ class CleanroomProcessProxy:
 
     def __del__(self):
         # Remove process in GC.
+        if self._crw_proc._parent_pid != os.getpid():
+            logger.debug('CleanroomProcessProxy.__del__: killing unknown proc=%s', self._crw_proc)
+            if hasattr(self._crw_proc, 'kill'):
+                # New in 3.7.
+                getattr(self._crw_proc, 'kill')()
+            return
+
+        # Normal termination.
+        logger.debug('CleanroomProcessProxy.__del__: terminating proc=%s', self._crw_proc)
         self._crw_proc.terminate()
 
         # Default timeout: 30s.
         timeout = self._crw_timeout or 30
-        gap = 0.1
-        acc = 0
-        while acc < timeout and self._crw_proc.is_alive():
-            time.sleep(gap)
-            acc += gap
-        if acc >= timeout:
-            # Kill.
+        self._crw_proc.join(timeout)
+        if self._crw_proc.exitcode is None:
+            logger.debug('CleanroomProcessProxy.__del__: timeout & force killing proc=%s',
+                         self._crw_proc)
             self._crw_proc.kill()
+        else:
+            logger.debug('CleanroomProcessProxy.__del__: proc=%s is terminated', self._crw_proc)
 
 
 def create_instance(
@@ -227,6 +247,9 @@ def create_instance(
         cleanroom_args=None,
         timeout=None,
 ):
+    logger.debug('create_instance: instance_cls=%s, cleanroom_args=%s, timeout=%s', instance_cls,
+                 cleanroom_args, timeout)
+
     CleanroomProcessProxy._crw_check_instance_cls_methods(instance_cls)  # pylint: disable=protected-access
 
     proc, in_queue, out_queue, state, lock = create_proc_channel(
@@ -234,17 +257,19 @@ def create_instance(
             cleanroom_args,
     )
 
-    # Initialization.
+    logger.debug('create_instance: proc=%s, trigger initialization', proc)
     in_queue.put(None)
     try:
+        logger.debug('create_instance: proc=%s, waiting for initialization...', proc)
         good, out = out_queue.get(timeout=timeout)
     except queue.Empty:
-        raise TimeoutException(f'Timeout (timeout={timeout}) during initialization.')
+        raise TimeoutException(f'Timeout (timeout={timeout}) during initialization')
 
     if not good:
         out.raise_again()
 
-    return CleanroomProcessProxy(
+    logger.debug('create_instance: proc=%s, initialization done', proc)
+    proxy = CleanroomProcessProxy(
             instance_cls,
             proc,
             in_queue,
@@ -253,6 +278,8 @@ def create_instance(
             state,
             lock,
     )
+    logger.debug('create_instance: proxy=%s has been created for proc=%s', proxy, proc)
+    return proxy
 
 
 class ProxySchedulerCall:
