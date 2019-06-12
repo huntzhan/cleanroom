@@ -75,12 +75,17 @@ class CleanroomProcess(Process):
             sys.exit(-1)
 
     def _initialize(self, in_queue_popped):  # pylint: disable=unused-argument
+        logger.debug('CleanroomProcess._initialize: proc=%s begin', self)
         self.instance = self.instance_cls(*self.args, **self.kwargs)
+        logger.debug('CleanroomProcess._initialize: proc=%s end', self)
 
     def _step(self, in_queue_popped):
+        logger.debug('CleanroomProcess._step: proc=%s begin', self)
         method_name, method_args, method_kwargs = in_queue_popped
         method = getattr(self.instance, method_name)
-        return method(*method_args, **method_kwargs)
+        ret = method(*method_args, **method_kwargs)
+        logger.debug('CleanroomProcess._step: proc=%s end', self)
+        return ret
 
     def run(self):
         # Initialization.
@@ -89,8 +94,11 @@ class CleanroomProcess(Process):
         # Serving.
         while True:
             try:
+                logger.debug('CleanroomProcess.run: proc=%s waiting for in_queue.get', self)
                 obj = self.in_queue.get()
+                logger.debug('CleanroomProcess.run: proc=%s receive in_queue.get', self)
             except EOFError:
+                logger.debug('CleanroomProcess.run: proc=%s EOFError & break', self)
                 break
             self._exception_handler(self._step, obj)
 
@@ -127,7 +135,8 @@ def create_proc_channel(instance_cls, cleanroom_args=None):
 
 class ProxyCall:
 
-    def __init__(self, method_name, in_queue, out_queue, timeout, state, lock):
+    def __init__(self, proc_repr, method_name, in_queue, out_queue, timeout, state, lock):
+        self.proc_repr = proc_repr
         self.method_name = method_name
         self.in_queue = in_queue
         self.out_queue = out_queue
@@ -136,7 +145,14 @@ class ProxyCall:
         self.lock = lock
 
     def __call__(self, *args, **kwargs):
+        logger.debug(
+                'ProxyCall.__call__: waiting for lock proc=%s, method_name=%s, args=%s, kwargs=%s',
+                self.proc_repr, self.method_name, args, kwargs)
         with self.lock:
+            logger.debug(
+                    'ProxyCall.__call__: acquire lock proc=%s, method_name=%s, args=%s, kwargs=%s',
+                    self.proc_repr, self.method_name, args, kwargs)
+
             if self.state.value != 1:
                 raise RuntimeError('The process is not alive!')
 
@@ -208,6 +224,7 @@ class CleanroomProcessProxy:
             _raise_on_invalid_method_name(self._crw_instance_cls, name)
 
             self._crw_cached_proxy_call[name] = ProxyCall(
+                    proc_repr=repr(self._crw_proc),
                     method_name=name,
                     in_queue=self._crw_in_queue,
                     out_queue=self._crw_out_queue,
@@ -220,7 +237,7 @@ class CleanroomProcessProxy:
 
     def __del__(self):
         # Remove process in GC.
-        if self._crw_proc._parent_pid != os.getpid():
+        if self._crw_proc._parent_pid != os.getpid():  # pylint: disable=protected-access
             logger.debug('CleanroomProcessProxy.__del__: killing unknown proc=%s', self._crw_proc)
             if hasattr(self._crw_proc, 'kill'):
                 # New in 3.7.
